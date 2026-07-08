@@ -48,6 +48,12 @@ https://integrate.api.nvidia.com/v1
   - accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY/MM/DD`, and `MM/DD/YYYY`,
   - normalizes pasted Slack/Markdown/browser URLs such as `<https://...|...>` and `host (https://...)`.
 - Visible progress while waiting for NVIDIA API/model responses.
+- Streaming model output for interactive and one-shot asks.
+- Codex-like action workflow:
+  - model-proposed `read_file` actions execute and feed results back,
+  - `patch_file` actions show a unified diff preview and ask for approval,
+  - `shell` actions show the command preview and ask for approval,
+  - `nvai ask --yes` can auto-approve proposed patch/shell actions for trusted automation.
 - User-local installer for GitHub `curl | bash` installation.
 - `nvai doctor` diagnostics for executable/Python/PATH/key status.
 
@@ -138,6 +144,20 @@ API Key: **********************************************************************
 Expire date [2026-07-09T00:00:00+09:00]: 01/08/2027
 ```
 
+### Codex-like action workflow
+
+The action workflow is intentionally model-proposed and user-approved. When the model needs evidence or wants to change/run something, it can emit:
+
+```nvai-actions
+[
+  {"action":"read_file","path":"README.md","max_bytes":12000},
+  {"action":"patch_file","path":"file.py","old":"exact old text","new":"replacement text"},
+  {"action":"shell","command":"pytest -q","timeout":120}
+]
+```
+
+`read_file` runs immediately. `patch_file` prints a unified diff preview and asks before applying. `shell` prints the command preview and asks before execution. In non-interactive automation, proposed patch/shell actions are denied unless `--yes` is supplied.
+
 ### Commands
 
 ```bash
@@ -145,6 +165,8 @@ nvai                     # interactive mode
 nvai "Analyze this repo" # one-shot prompt with project context
 nvai ask "Say OK"        # explicit one-shot ask
 nvai ask --no-context "Say OK"
+nvai ask --no-stream "Say OK"
+nvai ask --yes "Inspect README and run a safe command if needed"
 nvai models              # list NVIDIA models
 nvai doctor              # inspect installation and key status
 nvai auth status
@@ -256,6 +278,12 @@ https://integrate.api.nvidia.com/v1
   - 날짜 형식: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY/MM/DD`, `MM/DD/YYYY`,
   - URL 형식: `<https://...|...>`, `host (https://...)` 자동 정규화.
 - NVIDIA API 응답 대기 중 진행 상태 표시.
+- 인터랙티브/단발 요청에서 streaming model output 지원.
+- Codex-like action workflow 지원:
+  - 모델이 제안한 `read_file` action은 실행 후 결과를 다시 모델에 전달,
+  - `patch_file` action은 unified diff preview를 보여준 뒤 승인 후 적용,
+  - `shell` action은 command preview를 보여준 뒤 승인 후 실행,
+  - 신뢰 가능한 자동화에서는 `nvai ask --yes`로 patch/shell action 자동 승인 가능.
 - GitHub `curl | bash` 방식의 user-local 설치 지원.
 - `nvai doctor`로 설치/실행 상태 진단.
 
@@ -346,6 +374,20 @@ API Key: **********************************************************************
 Expire date [2026-07-09T00:00:00+09:00]: 01/08/2027
 ```
 
+### Codex-like action workflow
+
+action workflow는 모델이 제안하고 사용자가 승인하는 구조입니다. 모델이 근거 확인, 파일 수정, 명령 실행이 필요하다고 판단하면 다음 JSON block을 출력할 수 있습니다.
+
+```nvai-actions
+[
+  {"action":"read_file","path":"README.md","max_bytes":12000},
+  {"action":"patch_file","path":"file.py","old":"exact old text","new":"replacement text"},
+  {"action":"shell","command":"pytest -q","timeout":120}
+]
+```
+
+`read_file`은 즉시 실행됩니다. `patch_file`은 unified diff preview를 보여주고 승인 후 적용합니다. `shell`은 command preview를 보여주고 승인 후 실행합니다. non-interactive 자동화 환경에서는 `--yes`를 주지 않으면 patch/shell action은 거부됩니다.
+
 ### 명령어
 
 ```bash
@@ -353,6 +395,8 @@ nvai                         # 인터랙티브 모드
 nvai "이 repo 분석해줘"       # 현재 디렉터리 context 포함 단발 요청
 nvai ask "Say OK"            # 명시적 단발 질문
 nvai ask --no-context "Say OK"
+nvai ask --no-stream "Say OK"
+nvai ask --yes "README를 확인하고 필요한 안전한 명령을 실행해줘"
 nvai models                  # NVIDIA 모델 목록
 nvai doctor                  # 설치 및 key 상태 진단
 nvai auth status

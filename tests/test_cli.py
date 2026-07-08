@@ -24,6 +24,14 @@ def test_doctor_parses():
     assert args.command == "doctor"
 
 
+def test_ask_tool_flags_parse():
+    args = build_parser().parse_args(["ask", "hello", "--no-context", "--no-stream", "--yes"])
+    assert args.command == "ask"
+    assert args.no_context is True
+    assert args.no_stream is True
+    assert args.yes is True
+
+
 def test_ask_shows_progress_messages(capsys):
     key = ApiKeyRecord(
         name="k",
@@ -33,7 +41,8 @@ def test_ask_shows_progress_messages(capsys):
     )
     with patch("nvai.cli.ensure_valid_api_key", return_value=key), patch("nvai.cli.collect_project_context", return_value="ctx"):
         with patch("nvai.cli.NvidiaClient") as client_cls:
-            client_cls.return_value.chat.return_value = "answer"
+            client_cls.return_value.key = key
+            client_cls.return_value.chat_stream.return_value = iter(["answer"])
             assert main(["ask", "hello"]) == 0
     captured = capsys.readouterr()
     assert "answer" in captured.out

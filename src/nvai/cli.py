@@ -4,6 +4,7 @@ import argparse
 import sys
 from datetime import datetime
 
+from .agent import ACTION_INSTRUCTIONS, run_agent_turn
 from .auth_flow import ensure_valid_api_key
 from .context import collect_project_context
 from .doctor import run_doctor
@@ -12,15 +13,19 @@ from .nvidia_client import NvidiaApiError, NvidiaClient
 from .ui import Status
 
 SYSTEM_PROMPT = """You are nvai, a coding assistant running in a Linux CLI.
-Be concise, practical, and safe. If code changes are needed, propose clear diffs or steps.
-Never claim a file was changed unless the CLI/tool actually changed it.
-"""
+Be concise, practical, and safe. If code changes are needed, use the nvai tool protocol to read files, propose patches, or run commands.
+Never claim a file was changed or a command was run unless tool results show it happened.
+""" + ACTION_INSTRUCTIONS
 
 REPL_HELP = """Commands:
   /help      Show this help
   /context   Add current project context to the conversation
   /exit      Quit nvai
   /quit      Quit nvai
+
+Agent workflow:
+  nvai can read files, preview patches, and propose shell commands through action blocks.
+  patch_file and shell actions show a preview and ask for approval before running.
 
 Shortcuts:
   Ctrl+C     Quit nvai and return to the terminal
@@ -83,14 +88,12 @@ def _messages(prompt: str, include_context: bool = True) -> list[dict]:
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
 
 
-def _ask(prompt: str, *, include_context: bool = True) -> int:
+def _ask(prompt: str, *, include_context: bool = True, stream: bool = True, auto_approve: bool = False) -> int:
     key = ensure_valid_api_key()
     client = NvidiaClient(key)
     with Status("Collecting project context" if include_context else "Preparing prompt"):
         messages = _messages(prompt, include_context=include_context)
-    with Status(f"Waiting for NVIDIA model response ({key.model})"):
-        answer = client.chat(messages)
-    print(answer)
+    run_agent_turn(client, messages, stream=stream, auto_approve=auto_approve)
     return 0
 
 
@@ -131,10 +134,7 @@ def _repl() -> int:
             print("[context] added")
             continue
         history.append({"role": "user", "content": prompt})
-        with Status(f"Waiting for NVIDIA model response ({key.model})"):
-            answer = client.chat(history)
-        print(answer)
-        history.append({"role": "assistant", "content": answer})
+        run_agent_turn(client, history, stream=True, auto_approve=False)
 
 
 KNOWN_COMMANDS = {"auth", "models", "ask", "doctor"}
@@ -159,6 +159,8 @@ def build_parser() -> argparse.ArgumentParser:
     ask = sub.add_parser("ask")
     ask.add_argument("prompt")
     ask.add_argument("--no-context", action="store_true")
+    ask.add_argument("--no-stream", action="store_true", help="disable streaming output")
+    ask.add_argument("--yes", action="store_true", help="auto-approve proposed patch/shell actions")
 
     return parser
 
@@ -177,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             return run_doctor()
         if args.command == "ask":
-            return _ask(args.prompt, include_context=not args.no_context)
+            return _ask(args.prompt, include_context=not args.no_context, stream=not args.no_stream, auto_approve=args.yes)
         return _repl()
     except NvidiaApiError as exc:
         print(f"error: {exc}", file=sys.stderr)

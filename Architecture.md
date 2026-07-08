@@ -42,18 +42,18 @@ Implemented:
 - Expire-date parsing for multiple common formats.
 - Masked API-key input.
 - Status/spinner output.
+- Streaming model output.
+- Bounded Codex-like action loop for model-proposed `read_file`, `patch_file`, and `shell` actions.
+- Diff preview and approval before patch application.
+- Safe shell command preview and approval before execution.
 - User-local install/uninstall scripts.
 - `nvai doctor` diagnostics.
 - Tests for auth/date parsing, key storage, CLI routing, progress UI, doctor, and prompt utilities.
 
 Not implemented yet:
 
-- Agent tool protocol for file patching.
-- Safe shell command execution loop.
-- Diff preview and patch approval.
 - Full-screen TUI.
 - `.deb` package and apt repository.
-- Streaming token output.
 
 ### 4. Runtime model
 
@@ -98,6 +98,7 @@ exec "$NVAI_PYTHON" -m nvai.cli "$@"
 ```text
 src/nvai/
   __init__.py
+  agent.py           # bounded model/action/tool-result loop
   auth_flow.py       # ensures a valid active API key exists
   cli.py             # argparse entrypoint, REPL, one-shot commands
   context.py         # lightweight project context collection
@@ -107,6 +108,7 @@ src/nvai/
   key_store.py       # TOML key-store load/save and permissions
   models.py          # dataclasses and defaults
   nvidia_client.py   # NVIDIA OpenAI-compatible HTTP client
+  tools.py           # read_file, patch_file, shell actions and approvals
   ui.py              # status spinner / non-TTY status lines
 
 tests/
@@ -377,18 +379,18 @@ nvai
 - 여러 날짜 형식 parsing.
 - `*` 표시가 있는 API Key 입력.
 - 상태 spinner/progress 출력.
+- streaming model output.
+- 모델이 제안하는 `read_file`, `patch_file`, `shell` action을 처리하는 bounded Codex-like action loop.
+- patch 적용 전 diff preview 및 승인 flow.
+- shell command 실행 전 preview 및 승인 flow.
 - user-local install/uninstall script.
 - `nvai doctor` 진단 명령.
 - auth/date/key/CLI/progress/doctor 관련 테스트.
 
 아직 미구현:
 
-- 파일 patching용 agent tool protocol.
-- 안전한 shell command 실행 loop.
-- diff preview 및 patch 승인.
 - full-screen TUI.
 - `.deb` 패키지와 apt repository.
-- token streaming 출력.
 
 ### 4. 실행 모델
 
@@ -433,6 +435,7 @@ exec "$NVAI_PYTHON" -m nvai.cli "$@"
 ```text
 src/nvai/
   __init__.py
+  agent.py           # 모델/action/tool-result loop
   auth_flow.py       # 유효한 active API Key 보장
   cli.py             # argparse entrypoint, REPL, 단발 명령
   context.py         # 가벼운 프로젝트 context 수집
@@ -442,6 +445,7 @@ src/nvai/
   key_store.py       # TOML key-store load/save 및 권한 처리
   models.py          # dataclass 및 기본값
   nvidia_client.py   # NVIDIA OpenAI 호환 HTTP client
+  tools.py           # read_file, patch_file, shell action 및 승인 처리
   ui.py              # spinner/status line
 
 tests/

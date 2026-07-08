@@ -25,11 +25,24 @@ def test_doctor_parses():
 
 
 def test_ask_tool_flags_parse():
-    args = build_parser().parse_args(["ask", "hello", "--no-context", "--no-stream", "--yes"])
+    args = build_parser().parse_args([
+        "ask",
+        "hello",
+        "--no-context",
+        "--no-stream",
+        "--yes",
+        "--policy",
+        "strict",
+        "--no-batch-patches",
+        "--no-stream-detect",
+    ])
     assert args.command == "ask"
     assert args.no_context is True
     assert args.no_stream is True
     assert args.yes is True
+    assert args.policy == "strict"
+    assert args.no_batch_patches is True
+    assert args.no_stream_detect is True
 
 
 def test_ask_shows_progress_messages(capsys):

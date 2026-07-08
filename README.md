@@ -49,10 +49,14 @@ https://integrate.api.nvidia.com/v1
   - normalizes pasted Slack/Markdown/browser URLs such as `<https://...|...>` and `host (https://...)`.
 - Visible progress while waiting for NVIDIA API/model responses.
 - Streaming model output for interactive and one-shot asks.
+- Streaming-time action-block detection: complete `nvai-actions` blocks are detected while chunks arrive, then executed after the answer finishes.
+- Minimal full-screen TUI via `nvai tui` using Python stdlib `curses`.
 - Codex-like action workflow:
   - model-proposed `read_file` actions execute and feed results back,
-  - `patch_file` actions show a unified diff preview and ask for approval,
-  - `shell` actions show the command preview and ask for approval,
+  - multiple `patch_file` actions are previewed together and can be batch-approved,
+  - `patch_file` actions show a unified diff preview before approval,
+  - `shell` actions show the command preview, pass command policy, then ask for approval,
+  - `nvai ask --policy strict|ask|off` controls shell policy mode,
   - `nvai ask --yes` can auto-approve proposed patch/shell actions for trusted automation.
 - User-local installer for GitHub `curl | bash` installation.
 - `nvai doctor` diagnostics for executable/Python/PATH/key status.
@@ -156,7 +160,41 @@ The action workflow is intentionally model-proposed and user-approved. When the 
 ]
 ```
 
-`read_file` runs immediately. `patch_file` prints a unified diff preview and asks before applying. `shell` prints the command preview and asks before execution. In non-interactive automation, proposed patch/shell actions are denied unless `--yes` is supplied.
+`read_file` runs immediately. `patch_file` prints a unified diff preview and asks before applying. When multiple patches are proposed in the same block, `nvai` shows one batch diff preview and asks whether to apply all valid patches together. `shell` prints the command preview, checks command policy, and asks before execution. In non-interactive automation, proposed patch/shell actions are denied unless `--yes` is supplied.
+
+Shell command policy defaults to `ask` mode with dangerous commands denied before approval. You can override per run:
+
+```bash
+nvai ask --policy strict "Run only policy-approved commands if needed"
+nvai ask --policy off "Disable shell policy checks for this trusted run"
+```
+
+A policy file can also be placed at `~/.config/nvai/policy.toml`:
+
+```toml
+[shell]
+mode = "strict" # ask | strict | off
+allow = ["pytest", "uv run", "python -m pytest"]
+deny = ["rm -rf /", "mkfs", "shutdown"]
+```
+
+Streaming output detects complete action blocks while chunks arrive and prints a notice. The action is executed only after the assistant answer finishes, so previews and approvals do not interrupt the model stream.
+
+### Full-screen TUI
+
+```bash
+nvai tui
+```
+
+`nvai tui` opens a minimal `curses` full-screen chat UI:
+
+```text
+F2   send current message
+F10  quit
+Esc  quit
+```
+
+This is intentionally a lightweight stdlib TUI. The richer Codex-like tool workflow remains in `nvai ask` and the normal REPL while the TUI matures.
 
 ### Commands
 
@@ -167,6 +205,10 @@ nvai ask "Say OK"        # explicit one-shot ask
 nvai ask --no-context "Say OK"
 nvai ask --no-stream "Say OK"
 nvai ask --yes "Inspect README and run a safe command if needed"
+nvai ask --policy strict "Run tests if needed"
+nvai ask --no-batch-patches "Approve proposed patches one by one"
+nvai ask --no-stream-detect "Disable streaming action detection"
+nvai tui                 # minimal full-screen curses UI
 nvai models              # list NVIDIA models
 nvai doctor              # inspect installation and key status
 nvai auth status
@@ -279,10 +321,14 @@ https://integrate.api.nvidia.com/v1
   - URL 형식: `<https://...|...>`, `host (https://...)` 자동 정규화.
 - NVIDIA API 응답 대기 중 진행 상태 표시.
 - 인터랙티브/단발 요청에서 streaming model output 지원.
+- streaming 중 완성된 `nvai-actions` block을 감지하고, 응답 완료 후 실행.
+- `nvai tui`로 Python stdlib `curses` 기반 최소 full-screen TUI 제공.
 - Codex-like action workflow 지원:
   - 모델이 제안한 `read_file` action은 실행 후 결과를 다시 모델에 전달,
+  - 여러 `patch_file` action은 batch diff preview 후 한 번에 승인 가능,
   - `patch_file` action은 unified diff preview를 보여준 뒤 승인 후 적용,
-  - `shell` action은 command preview를 보여준 뒤 승인 후 실행,
+  - `shell` action은 command preview와 command policy 검사를 거친 뒤 승인 후 실행,
+  - `nvai ask --policy strict|ask|off`로 shell policy mode 지정 가능,
   - 신뢰 가능한 자동화에서는 `nvai ask --yes`로 patch/shell action 자동 승인 가능.
 - GitHub `curl | bash` 방식의 user-local 설치 지원.
 - `nvai doctor`로 설치/실행 상태 진단.
@@ -386,7 +432,41 @@ action workflow는 모델이 제안하고 사용자가 승인하는 구조입니
 ]
 ```
 
-`read_file`은 즉시 실행됩니다. `patch_file`은 unified diff preview를 보여주고 승인 후 적용합니다. `shell`은 command preview를 보여주고 승인 후 실행합니다. non-interactive 자동화 환경에서는 `--yes`를 주지 않으면 patch/shell action은 거부됩니다.
+`read_file`은 즉시 실행됩니다. `patch_file`은 unified diff preview를 보여주고 승인 후 적용합니다. 같은 action block 안에 patch가 여러 개 있으면 batch diff preview를 먼저 보여주고 전체 적용 여부를 한 번에 승인받을 수 있습니다. `shell`은 command preview와 command policy 검사를 거친 뒤 승인 후 실행합니다. non-interactive 자동화 환경에서는 `--yes`를 주지 않으면 patch/shell action은 거부됩니다.
+
+shell command policy는 기본적으로 `ask` mode이며, 위험한 command는 사용자 승인 전에 차단합니다. 실행별 override는 다음처럼 합니다.
+
+```bash
+nvai ask --policy strict "필요하면 policy가 허용한 명령만 실행해줘"
+nvai ask --policy off "신뢰하는 실행에서 shell policy 검사를 끄기"
+```
+
+정책 파일은 `~/.config/nvai/policy.toml`에 둘 수 있습니다.
+
+```toml
+[shell]
+mode = "strict" # ask | strict | off
+allow = ["pytest", "uv run", "python -m pytest"]
+deny = ["rm -rf /", "mkfs", "shutdown"]
+```
+
+streaming output 중 완성된 action block이 감지되면 notice를 출력합니다. 실제 action 실행은 assistant 응답이 끝난 뒤 진행하므로, diff preview와 승인 prompt가 모델 streaming을 중간에 끊지 않습니다.
+
+### Full-screen TUI
+
+```bash
+nvai tui
+```
+
+`nvai tui`는 최소 `curses` full-screen chat UI를 엽니다.
+
+```text
+F2   현재 메시지 전송
+F10  종료
+Esc  종료
+```
+
+현재 TUI는 stdlib 기반의 가벼운 MVP입니다. 더 풍부한 Codex-like tool workflow는 `nvai ask`와 일반 REPL에서 계속 사용하는 구조입니다.
 
 ### 명령어
 
@@ -397,6 +477,10 @@ nvai ask "Say OK"            # 명시적 단발 질문
 nvai ask --no-context "Say OK"
 nvai ask --no-stream "Say OK"
 nvai ask --yes "README를 확인하고 필요한 안전한 명령을 실행해줘"
+nvai ask --policy strict "필요하면 테스트를 실행해줘"
+nvai ask --no-batch-patches "patch는 하나씩 승인할게"
+nvai ask --no-stream-detect "streaming action 감지를 끄기"
+nvai tui                     # 최소 full-screen curses UI
 nvai models                  # NVIDIA 모델 목록
 nvai doctor                  # 설치 및 key 상태 진단
 nvai auth status

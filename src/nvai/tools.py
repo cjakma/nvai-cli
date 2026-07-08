@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .policy import CommandPolicy
+
 
 ACTION_BLOCK_RE = re.compile(r"```(?:nvai-actions|nvai_action|json)\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -21,18 +23,16 @@ class ToolResult:
     content: str = ""
 
 
+@dataclass(slots=True)
+class PendingPatch:
+    action: dict[str, Any]
+    ok: bool
+    path: Path | None
+    preview: str
+
+
 def parse_action_blocks(text: str) -> list[dict[str, Any]]:
-    """Parse model-proposed nvai action blocks from fenced JSON.
-
-    Accepted forms:
-    ```nvai-actions
-    [{"action":"read_file","path":"README.md"}]
-    ```
-
-    ```nvai_action
-    {"action":"shell","command":"pytest -q"}
-    ```
-    """
+    """Parse model-proposed nvai action blocks from fenced JSON."""
     actions: list[dict[str, Any]] = []
     for match in ACTION_BLOCK_RE.finditer(text or ""):
         raw = match.group(1).strip()
@@ -47,6 +47,11 @@ def parse_action_blocks(text: str) -> list[dict[str, Any]]:
         if isinstance(parsed, list):
             actions.extend(item for item in parsed if isinstance(item, dict) and item.get("action"))
     return actions
+
+
+def detect_complete_action_blocks(text: str) -> list[dict[str, Any]]:
+    """Return actions only when a complete fenced action block is visible in a streaming buffer."""
+    return parse_action_blocks(text)
 
 
 def _safe_path(path: str, *, cwd: Path | None = None) -> Path:
@@ -105,7 +110,11 @@ def shell_preview(command: str) -> str:
     return f"Command to execute:\n\n    {command}\n"
 
 
-def shell_tool(command: str, *, cwd: Path | None = None, timeout: int = 120) -> ToolResult:
+def shell_tool(command: str, *, cwd: Path | None = None, timeout: int = 120, policy: CommandPolicy | None = None) -> ToolResult:
+    policy = policy or CommandPolicy.default()
+    allowed, reason = policy.check(command)
+    if not allowed:
+        return ToolResult(False, "shell", reason)
     proc = subprocess.run(
         command,
         shell=True,
@@ -131,7 +140,32 @@ def approve(prompt: str, *, auto_approve: bool = False) -> bool:
     return answer in {"y", "yes"}
 
 
-def run_action(action: dict[str, Any], *, auto_approve: bool = False, cwd: Path | None = None) -> ToolResult:
+def approve_batch(prompt: str, *, auto_approve: bool = False) -> bool:
+    if auto_approve:
+        print("[approval] batch auto-approved")
+        return True
+    if not os.isatty(0):
+        print("[approval] batch denied: non-interactive terminal. Re-run with --yes to approve proposed actions.")
+        return False
+    answer = input(f"{prompt} [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+def _prepare_patch(action: dict[str, Any], *, cwd: Path | None = None) -> PendingPatch:
+    path = str(action.get("path", ""))
+    old = str(action.get("old", ""))
+    new = str(action.get("new", ""))
+    ok, preview, p = patch_preview(path, old, new, cwd=cwd)
+    return PendingPatch(action=action, ok=ok, path=p, preview=preview)
+
+
+def run_action(
+    action: dict[str, Any],
+    *,
+    auto_approve: bool = False,
+    cwd: Path | None = None,
+    policy: CommandPolicy | None = None,
+) -> ToolResult:
     kind = str(action.get("action", "")).strip()
     if kind == "read_file":
         return read_file_tool(str(action.get("path", "")), max_bytes=int(action.get("max_bytes", 12000)), cwd=cwd)
@@ -148,11 +182,65 @@ def run_action(action: dict[str, Any], *, auto_approve: bool = False, cwd: Path 
         return patch_file_tool(path, old, new, cwd=cwd)
     if kind == "shell":
         command = str(action.get("command", ""))
+        active_policy = policy or CommandPolicy.default()
+        allowed, reason = active_policy.check(command)
         print("\n[shell preview]\n" + shell_preview(command))
+        print(f"[shell policy] {reason}")
+        if not allowed:
+            return ToolResult(False, "shell", reason)
         if not approve("Run this command?", auto_approve=auto_approve):
             return ToolResult(False, "shell", "user denied shell command")
-        return shell_tool(command, cwd=cwd, timeout=int(action.get("timeout", 120)))
+        return shell_tool(command, cwd=cwd, timeout=int(action.get("timeout", 120)), policy=active_policy)
     return ToolResult(False, kind or "unknown", f"unknown action: {kind}")
+
+
+def run_actions(
+    actions: list[dict[str, Any]],
+    *,
+    auto_approve: bool = False,
+    cwd: Path | None = None,
+    policy: CommandPolicy | None = None,
+    batch_patches: bool = True,
+) -> list[ToolResult]:
+    """Run actions with a batch approval path for multiple patch_file actions."""
+    results: list[ToolResult] = []
+    active_policy = policy or CommandPolicy.default()
+    patch_actions = [action for action in actions if str(action.get("action", "")).strip() == "patch_file"]
+    batch_patch_ids: set[int] = set()
+    if batch_patches and len(patch_actions) > 1:
+        prepared = [_prepare_patch(action, cwd=cwd) for action in patch_actions]
+        print(f"\n[batch diff preview] {len(prepared)} patch(es)")
+        all_ok = True
+        for idx, pending in enumerate(prepared, 1):
+            print(f"\n--- patch {idx}/{len(prepared)}: {pending.path or pending.action.get('path')} ---")
+            print(pending.preview)
+            all_ok = all_ok and pending.ok
+        if not all_ok:
+            for pending in prepared:
+                if not pending.ok:
+                    results.append(ToolResult(False, "patch_file", pending.preview))
+            batch_patch_ids = {id(p.action) for p in prepared}
+        elif approve_batch(f"Apply all {len(prepared)} patches?", auto_approve=auto_approve):
+            for pending in prepared:
+                results.append(
+                    patch_file_tool(
+                        str(pending.action.get("path", "")),
+                        str(pending.action.get("old", "")),
+                        str(pending.action.get("new", "")),
+                        cwd=cwd,
+                    )
+                )
+            batch_patch_ids = {id(p.action) for p in prepared}
+        else:
+            for pending in prepared:
+                results.append(ToolResult(False, "patch_file", "user denied patch batch"))
+            batch_patch_ids = {id(p.action) for p in prepared}
+
+    for action in actions:
+        if id(action) in batch_patch_ids:
+            continue
+        results.append(run_action(action, auto_approve=auto_approve, cwd=cwd, policy=active_policy))
+    return results
 
 
 def format_tool_results(results: list[ToolResult]) -> str:

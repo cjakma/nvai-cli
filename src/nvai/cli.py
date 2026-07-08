@@ -10,6 +10,8 @@ from .context import collect_project_context
 from .doctor import run_doctor
 from .key_store import load_key_store, save_key_store
 from .nvidia_client import NvidiaApiError, NvidiaClient
+from .policy import CommandPolicy, describe_policy
+from .tui import run_curses_tui
 from .ui import Status
 
 SYSTEM_PROMPT = """You are nvai, a coding assistant running in a Linux CLI.
@@ -88,12 +90,39 @@ def _messages(prompt: str, include_context: bool = True) -> list[dict]:
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
 
 
-def _ask(prompt: str, *, include_context: bool = True, stream: bool = True, auto_approve: bool = False) -> int:
+def _ask(
+    prompt: str,
+    *,
+    include_context: bool = True,
+    stream: bool = True,
+    auto_approve: bool = False,
+    policy_mode: str | None = None,
+    batch_patches: bool = True,
+    detect_stream_actions: bool = True,
+) -> int:
     key = ensure_valid_api_key()
     client = NvidiaClient(key)
+    policy = CommandPolicy.from_config()
+    if policy_mode:
+        policy = CommandPolicy(
+            mode=policy_mode,
+            allow=policy.allow,
+            deny=policy.deny,
+            allowed_first_words=policy.allowed_first_words,
+            denied_first_words=policy.denied_first_words,
+        )
     with Status("Collecting project context" if include_context else "Preparing prompt"):
         messages = _messages(prompt, include_context=include_context)
-    run_agent_turn(client, messages, stream=stream, auto_approve=auto_approve)
+    print(f"[policy] {describe_policy(policy)}", file=sys.stderr)
+    run_agent_turn(
+        client,
+        messages,
+        stream=stream,
+        auto_approve=auto_approve,
+        policy=policy,
+        batch_patches=batch_patches,
+        detect_stream_actions=detect_stream_actions,
+    )
     return 0
 
 
@@ -137,7 +166,21 @@ def _repl() -> int:
         run_agent_turn(client, history, stream=True, auto_approve=False)
 
 
-KNOWN_COMMANDS = {"auth", "models", "ask", "doctor"}
+def _cmd_tui(args: argparse.Namespace) -> int:
+    key = ensure_valid_api_key()
+    client = NvidiaClient(key)
+    history = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    def send_message(message: str) -> str:
+        history.append({"role": "user", "content": message})
+        answer = client.chat(history)
+        history.append({"role": "assistant", "content": answer})
+        return answer
+
+    return run_curses_tui(send_message)
+
+
+KNOWN_COMMANDS = {"auth", "models", "ask", "doctor", "tui"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -156,11 +199,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("models")
     sub.add_parser("doctor")
+    sub.add_parser("tui", help="open a minimal full-screen curses UI")
     ask = sub.add_parser("ask")
     ask.add_argument("prompt")
     ask.add_argument("--no-context", action="store_true")
     ask.add_argument("--no-stream", action="store_true", help="disable streaming output")
     ask.add_argument("--yes", action="store_true", help="auto-approve proposed patch/shell actions")
+    ask.add_argument("--policy", choices=["ask", "strict", "off"], default=None, help="override shell command policy mode")
+    ask.add_argument("--no-batch-patches", action="store_true", help="approve patch_file actions one by one")
+    ask.add_argument("--no-stream-detect", action="store_true", help="disable action-block detection while streaming")
 
     return parser
 
@@ -178,8 +225,18 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_models(args)
         if args.command == "doctor":
             return run_doctor()
+        if args.command == "tui":
+            return _cmd_tui(args)
         if args.command == "ask":
-            return _ask(args.prompt, include_context=not args.no_context, stream=not args.no_stream, auto_approve=args.yes)
+            return _ask(
+                args.prompt,
+                include_context=not args.no_context,
+                stream=not args.no_stream,
+                auto_approve=args.yes,
+                policy_mode=args.policy,
+                batch_patches=not args.no_batch_patches,
+                detect_stream_actions=not args.no_stream_detect,
+            )
         return _repl()
     except NvidiaApiError as exc:
         print(f"error: {exc}", file=sys.stderr)

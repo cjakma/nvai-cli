@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from .nvidia_client import NvidiaClient
-from .tools import format_tool_results, parse_action_blocks, run_action
+from .policy import CommandPolicy
+from .tools import detect_complete_action_blocks, format_tool_results, parse_action_blocks, run_actions
 from .ui import Status
 
 ACTION_INSTRUCTIONS = """
-
 Tool protocol:
 When you need local project evidence or want to modify/run something, propose actions in a fenced JSON block.
 Use only these actions:
@@ -24,17 +24,32 @@ Rules:
 - Prefer read_file before patching unknown files.
 - patch_file must use exact, unique old text.
 - shell and patch_file require user approval and will show preview first.
+- Multiple patch_file actions are previewed together and can be batch-approved.
+- Shell commands pass through nvai's command policy before approval.
 - Never claim an action ran until a tool result is returned.
 """
 
 
-def stream_or_chat(client: NvidiaClient, messages: list[dict[str, Any]], *, stream: bool, model: str) -> str:
+def stream_or_chat(
+    client: NvidiaClient,
+    messages: list[dict[str, Any]],
+    *,
+    stream: bool,
+    model: str,
+    detect_actions: bool = True,
+) -> str:
     if stream:
         print(f"[stream] Waiting for NVIDIA model response ({model})...", file=sys.stderr)
         chunks: list[str] = []
+        announced_action_count = 0
         for chunk in client.chat_stream(messages):
             print(chunk, end="", flush=True)
             chunks.append(chunk)
+            if detect_actions:
+                actions = detect_complete_action_blocks("".join(chunks))
+                if len(actions) > announced_action_count:
+                    announced_action_count = len(actions)
+                    print(f"\n[stream] detected {announced_action_count} complete action(s); will run after answer finishes", file=sys.stderr)
         print()
         return "".join(chunks)
     with Status(f"Waiting for NVIDIA model response ({model})"):
@@ -49,6 +64,9 @@ def run_agent_turn(
     auto_approve: bool = False,
     max_rounds: int = 3,
     cwd: Path | None = None,
+    policy: CommandPolicy | None = None,
+    batch_patches: bool = True,
+    detect_stream_actions: bool = True,
 ) -> str:
     """Run a small Codex-like action loop.
 
@@ -57,8 +75,15 @@ def run_agent_turn(
     by max_rounds to avoid infinite loops.
     """
     last_answer = ""
+    active_policy = policy or CommandPolicy.default()
     for round_index in range(max_rounds):
-        answer = stream_or_chat(client, history, stream=stream, model=client.key.model)
+        answer = stream_or_chat(
+            client,
+            history,
+            stream=stream,
+            model=client.key.model,
+            detect_actions=detect_stream_actions,
+        )
         last_answer = answer
         if not stream:
             print(answer)
@@ -67,7 +92,13 @@ def run_agent_turn(
         if not actions:
             return answer
         print(f"[actions] {len(actions)} proposed action(s)")
-        results = [run_action(action, auto_approve=auto_approve, cwd=cwd) for action in actions]
+        results = run_actions(
+            actions,
+            auto_approve=auto_approve,
+            cwd=cwd,
+            policy=active_policy,
+            batch_patches=batch_patches,
+        )
         result_text = format_tool_results(results)
         print("\n[tool results]\n" + result_text)
         history.append({"role": "user", "content": "Tool results:\n" + result_text + "\n\nContinue from these results."})

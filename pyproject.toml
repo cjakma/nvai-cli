@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvai-cli"
-version = "0.0.1"
+version = "0.0.3"
 description = "NVIDIA AI GLM coding CLI with daily expiring API-key rotation"
 readme = "README.md"
 requires-python = ">=3.11"

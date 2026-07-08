@@ -43,17 +43,21 @@ Implemented:
 - Masked API-key input.
 - Status/spinner output.
 - Streaming model output.
+- Streaming-time action-block detection.
+- Minimal full-screen TUI via `nvai tui`.
 - Bounded Codex-like action loop for model-proposed `read_file`, `patch_file`, and `shell` actions.
+- Batch diff preview and approval for multiple `patch_file` actions.
 - Diff preview and approval before patch application.
-- Safe shell command preview and approval before execution.
+- Shell command policy plus preview/approval before execution.
 - User-local install/uninstall scripts.
 - `nvai doctor` diagnostics.
 - Tests for auth/date parsing, key storage, CLI routing, progress UI, doctor, and prompt utilities.
 
 Not implemented yet:
 
-- Full-screen TUI.
 - `.deb` package and apt repository.
+- Provider-native tool-calling adapters.
+- Richer project file search/list tools.
 
 ### 4. Runtime model
 
@@ -108,7 +112,9 @@ src/nvai/
   key_store.py       # TOML key-store load/save and permissions
   models.py          # dataclasses and defaults
   nvidia_client.py   # NVIDIA OpenAI-compatible HTTP client
-  tools.py           # read_file, patch_file, shell actions and approvals
+  policy.py          # shell command allow/deny policy
+  tools.py           # read_file, patch_file, shell actions, batch approvals
+  tui.py             # minimal curses full-screen UI
   ui.py              # status spinner / non-TTY status lines
 
 tests/
@@ -232,6 +238,10 @@ Commands:
 nvai                     -> interactive mode
 nvai "prompt"            -> one-shot prompt
 nvai ask "prompt"        -> explicit one-shot prompt
+nvai ask --policy strict  -> override shell command policy
+nvai ask --no-batch-patches -> approve patches one by one
+nvai ask --no-stream-detect -> disable streaming action detection
+nvai tui                 -> minimal full-screen curses UI
 nvai models              -> list NVIDIA models
 nvai doctor              -> local diagnostics
 nvai auth status/add/refresh/list/use
@@ -265,9 +275,45 @@ On non-TTY/logs:
 [ok] Waiting for NVIDIA model response (z-ai/glm-5.2) (2.4s)
 ```
 
-This makes long-running model/API calls visibly active.
+This makes long-running model/API calls visibly active. During streaming, `src/nvai/agent.py` accumulates chunks and calls `detect_complete_action_blocks()` so complete fenced `nvai-actions` blocks are noticed before the full answer ends. Tool execution still waits until the answer completes to avoid interleaving approval prompts with model output.
 
-### 13. Installer design
+### 13. Codex-like action, approval, and policy model
+
+The action loop is intentionally portable and text-based rather than provider-native:
+
+```text
+model response
+  -> parse fenced nvai-actions JSON
+  -> run read-only tools immediately
+  -> show batch diff preview for multiple patches
+  -> check shell command policy
+  -> ask for approval for patch/shell actions
+  -> feed tool results back to the model
+```
+
+`src/nvai/policy.py` implements a small shell command policy:
+
+```text
+ask    -> deny known-dangerous commands, then ask for approval
+strict -> require a configured/known-safe first word, then ask
+off    -> skip policy checks, but approval still applies unless --yes is used
+```
+
+`~/.config/nvai/policy.toml` may override shell policy fields. Policy is a safety gate before approval; it is not a sandbox.
+
+### 14. Full-screen TUI model
+
+`src/nvai/tui.py` provides a minimal stdlib `curses` UI:
+
+```text
+F2   send current input
+F10  quit
+Esc  quit
+```
+
+The TUI currently focuses on a full-screen chat surface. The richer tool workflow remains in `nvai ask` and REPL until the TUI grows a dedicated approval panel.
+
+### 15. Installer design
 
 `install.sh` and `scripts/install-user.sh` support:
 
@@ -305,7 +351,7 @@ To remove user config/API keys too:
 NVAI_REMOVE_CONFIG=1 bash uninstall.sh
 ```
 
-### 15. Test and verification strategy
+### 16. Test and verification strategy
 
 Tests are written with `pytest` and cover:
 
@@ -315,6 +361,10 @@ Tests are written with `pytest` and cover:
 - Key-store read/write and `0600` permissions.
 - URL normalization.
 - Status UI on non-TTY streams.
+- Streaming-time action detection.
+- Batch patch approval.
+- Shell command policy denial.
+- TUI pure rendering.
 - `nvai doctor` output.
 
 Typical verification:
@@ -326,18 +376,15 @@ PATH=/tmp/nvai-bin-test:$PATH nvai doctor
 NVAI_INSTALL_DIR=/tmp/nvai-install-test NVAI_BIN_DIR=/tmp/nvai-bin-test bash uninstall.sh
 ```
 
-### 16. Future architecture work
+### 17. Future architecture work
 
 Recommended next steps:
 
-1. Add an action-block tool protocol.
-2. Implement `read_file`, `write_patch`, and `shell` tools.
-3. Add patch preview and approval.
-4. Add safe command execution with confirmation.
-5. Add streaming model output.
-6. Add optional `prompt_toolkit` or full-screen TUI.
-7. Add GitHub Release packaging.
-8. Add `.deb` packaging and, later, apt repository support.
+1. Add provider-native tool-calling adapters where each model/API surface has stable semantics.
+2. Add richer file search/list tools with ignore rules, size caps, and preview limits.
+3. Add a TUI approval panel for patches and shell commands.
+4. Add GitHub Release packaging.
+5. Add `.deb` packaging and, later, apt repository support.
 
 ---
 
@@ -380,17 +427,21 @@ nvai
 - `*` 표시가 있는 API Key 입력.
 - 상태 spinner/progress 출력.
 - streaming model output.
+- streaming 중 action block 감지.
+- `nvai tui` 기반 최소 full-screen TUI.
 - 모델이 제안하는 `read_file`, `patch_file`, `shell` action을 처리하는 bounded Codex-like action loop.
+- 여러 `patch_file` action의 batch diff preview 및 승인 flow.
 - patch 적용 전 diff preview 및 승인 flow.
-- shell command 실행 전 preview 및 승인 flow.
+- shell command policy와 실행 전 preview/승인 flow.
 - user-local install/uninstall script.
 - `nvai doctor` 진단 명령.
-- auth/date/key/CLI/progress/doctor 관련 테스트.
+- auth/date/key/CLI/progress/action/TUI/doctor 관련 테스트.
 
 아직 미구현:
 
-- full-screen TUI.
 - `.deb` 패키지와 apt repository.
+- 모델별 native tool-calling adapter.
+- 더 정교한 file search/list tool.
 
 ### 4. 실행 모델
 
@@ -569,6 +620,10 @@ POST /chat/completions
 nvai                     -> 인터랙티브 모드
 nvai "prompt"            -> 단발 요청
 nvai ask "prompt"        -> 명시적 단발 요청
+nvai ask --policy strict  -> shell command policy override
+nvai ask --no-batch-patches -> patch를 하나씩 승인
+nvai ask --no-stream-detect -> streaming action 감지 비활성화
+nvai tui                 -> 최소 full-screen curses UI
 nvai models              -> NVIDIA 모델 목록
 nvai doctor              -> 로컬 진단
 nvai auth status/add/refresh/list/use
@@ -602,9 +657,45 @@ TTY에서는 다음처럼 spinner를 출력합니다.
 [ok] Waiting for NVIDIA model response (z-ai/glm-5.2) (2.4s)
 ```
 
-이를 통해 모델/API 응답 대기 중인지 사용자가 확인할 수 있습니다.
+이를 통해 모델/API 응답 대기 중인지 사용자가 확인할 수 있습니다. streaming 중에는 `src/nvai/agent.py`가 chunk를 누적하면서 완성된 fenced `nvai-actions` block을 감지합니다. 실제 tool 실행은 assistant 응답이 끝난 뒤 진행해 approval prompt가 모델 출력을 중간에 끊지 않도록 했습니다.
 
-### 13. Installer 설계
+### 13. Codex-like action, 승인, policy 모델
+
+action loop는 provider-native tool calling에 의존하지 않는 text 기반 protocol입니다.
+
+```text
+model response
+  -> fenced nvai-actions JSON parse
+  -> read-only tool은 즉시 실행
+  -> 여러 patch는 batch diff preview 표시
+  -> shell command policy 검사
+  -> patch/shell action 승인 요청
+  -> tool result를 모델에게 다시 전달
+```
+
+`src/nvai/policy.py`는 작은 shell command policy를 제공합니다.
+
+```text
+ask    -> 알려진 위험 명령 차단 후 승인 요청
+strict -> 설정/기본 허용 first word만 승인 요청
+off    -> policy 검사는 끄지만 --yes가 없으면 승인 요청은 유지
+```
+
+`~/.config/nvai/policy.toml`에서 shell policy를 override할 수 있습니다. policy는 approval 전 safety gate이며 sandbox는 아닙니다.
+
+### 14. Full-screen TUI 모델
+
+`src/nvai/tui.py`는 stdlib `curses` 기반 최소 UI를 제공합니다.
+
+```text
+F2   현재 입력 전송
+F10  종료
+Esc  종료
+```
+
+현재 TUI는 full-screen chat surface에 집중합니다. patch/shell 승인 panel은 다음 확장으로 남겨두고, 풍부한 tool workflow는 `nvai ask`와 REPL에서 동작합니다.
+
+### 15. Installer 설계
 
 `install.sh`와 `scripts/install-user.sh`는 다음 환경변수를 지원합니다.
 
@@ -642,7 +733,7 @@ API Key 설정까지 삭제하려면:
 NVAI_REMOVE_CONFIG=1 bash uninstall.sh
 ```
 
-### 15. 테스트 및 검증 전략
+### 16. 테스트 및 검증 전략
 
 `pytest` 기반 테스트는 다음을 검증합니다.
 
@@ -652,6 +743,10 @@ NVAI_REMOVE_CONFIG=1 bash uninstall.sh
 - key-store read/write 및 `0600` 권한.
 - URL 정규화.
 - non-TTY status UI.
+- streaming 중 action 감지.
+- batch patch 승인.
+- shell command policy 차단.
+- TUI pure rendering.
 - `nvai doctor` 출력.
 
 일반 검증 명령:
@@ -663,15 +758,12 @@ PATH=/tmp/nvai-bin-test:$PATH nvai doctor
 NVAI_INSTALL_DIR=/tmp/nvai-install-test NVAI_BIN_DIR=/tmp/nvai-bin-test bash uninstall.sh
 ```
 
-### 16. 향후 개발 방향
+### 17. 향후 개발 방향
 
 추천 다음 단계:
 
-1. action-block tool protocol 추가.
-2. `read_file`, `write_patch`, `shell` tool 구현.
-3. patch preview 및 승인 flow 추가.
-4. 안전한 command 실행 확인 flow 추가.
-5. streaming model output 추가.
-6. 선택적으로 `prompt_toolkit` 또는 full-screen TUI 추가.
-7. GitHub Release packaging 추가.
-8. `.deb` packaging 및 나중에 apt repository 지원.
+1. 각 모델/API surface의 semantics가 안정적일 때 provider-native tool-calling adapter 추가.
+2. ignore rule, size cap, preview limit을 갖춘 더 정교한 file search/list tool 추가.
+3. patch와 shell command를 TUI 안에서 승인하는 approval panel 추가.
+4. GitHub Release packaging 추가.
+5. `.deb` packaging 및 나중에 apt repository 지원.

@@ -3,8 +3,8 @@ set -euo pipefail
 
 # User-local installer for nvai-cli.
 # Intended usage after publishing to GitHub:
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/nvai-cli/main/install.sh | \
-#     NVAI_REPO_URL=https://github.com/<owner>/nvai-cli.git bash
+#   curl -fsSL https://raw.githubusercontent.com/cjakma/nvai-cli/main/install.sh | \
+#     NVAI_REPO_URL=https://github.com/cjakma/nvai-cli.git bash
 #
 # Optional environment variables:
 #   NVAI_REPO_URL     Git repository URL to clone. Required unless NVAI_SOURCE_DIR is set.
@@ -26,7 +26,7 @@ NVAI_WRAPPER="$NVAI_BIN_DIR/nvai"
 if [ -n "${NVAI_SOURCE_DIR:-}" ]; then
   [ -d "$NVAI_SOURCE_DIR" ] || fail "NVAI_SOURCE_DIR does not exist: $NVAI_SOURCE_DIR"
 elif [ -z "${NVAI_REPO_URL:-}" ]; then
-  fail "NVAI_REPO_URL is required when installing from curl. Example: curl -fsSL https://raw.githubusercontent.com/<owner>/nvai-cli/main/install.sh | NVAI_REPO_URL=https://github.com/<owner>/nvai-cli.git bash"
+  fail "NVAI_REPO_URL is required when installing from curl. Example: curl -fsSL https://raw.githubusercontent.com/cjakma/nvai-cli/main/install.sh | NVAI_REPO_URL=https://github.com/cjakma/nvai-cli.git bash"
 fi
 
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"

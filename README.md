@@ -47,7 +47,9 @@ https://integrate.api.nvidia.com/v1
 - Daily-expiring API-key lifecycle:
   - stores records in `~/.config/nvai/keys.toml`,
   - checks `expiredate` on every run,
-  - prompts for a new key when missing or expired,
+  - validates the active NVIDIA key with the API at most once per local calendar day,
+  - records `last_validated_at` after successful validation,
+  - prompts for a new key when missing, locally expired, or rejected by the daily API check,
   - masks API-key input with `*`,
   - saves the key store with `0600` permissions.
 - User-friendly setup input handling:
@@ -295,6 +297,7 @@ What changed:
 - Default chat completion output cap is now responsive: `DEFAULT_MAX_TOKENS=1024` instead of the earlier 8192-token default.
 - Default NVIDIA request timeout is now `180s`.
 - `TimeoutError` and `socket.timeout` are converted into `NvidiaApiError` messages, so users see a concise `error: NVIDIA API timed out...` message instead of a Python traceback.
+- Active keys are validated with NVIDIA at most once per local calendar day; successful checks update `last_validated_at`, so a long local expiry date such as `01/08/2027` does not prevent a daily API validity check.
 - REPL mode catches provider errors, removes the failed user turn from conversation history, and continues prompting.
 - `nvai ask` supports per-run tuning:
 
@@ -380,7 +383,9 @@ https://integrate.api.nvidia.com/v1
 - 매일 만료되는 API Key 관리:
   - `~/.config/nvai/keys.toml`에 key record 저장,
   - 실행할 때마다 `expiredate` 확인,
-  - key가 없거나 만료되면 새 key 입력,
+  - 로컬 날짜 기준 하루 최대 1회 active NVIDIA key를 API로 검증,
+  - 검증 성공 시 `last_validated_at` 기록,
+  - key가 없거나, 로컬 만료되었거나, 일일 API 검증에서 거부되면 새 key 입력,
   - API Key 입력 시 `*`로 masking,
   - key store 권한 `0600` 적용.
 - 사용자 입력 보정:
@@ -628,6 +633,7 @@ Key status: valid
 - 기본 chat completion 출력 cap을 기존 8192 token에서 `DEFAULT_MAX_TOKENS=1024` 낮춰 기본 응답성을 개선했습니다.
 - 기본 NVIDIA request timeout을 `180s`로 조정했습니다.
 - `TimeoutError`, `socket.timeout`을 `NvidiaApiError`로 변환하여 Python traceback 대신 `error: NVIDIA API timed out...` 형태의 간단한 CLI error를 출력합니다.
+- active key는 로컬 날짜 기준 하루 최대 1회 NVIDIA API로 검증하고, 성공 시 `last_validated_at`을 갱신합니다. 따라서 `01/08/2027`처럼 긴 로컬 만료일이 저장되어 있어도 일일 API 유효성 확인을 수행합니다.
 - REPL mode에서 provider error가 발생해도 실패한 user turn을 history에서 제거하고 prompt를 계속 유지합니다.
 - `nvai ask`에서 실행별 조정이 가능합니다.
 

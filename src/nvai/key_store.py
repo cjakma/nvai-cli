@@ -55,6 +55,7 @@ def load_key_store(path: Path | None = None) -> KeyStore:
                 base_url=item.get("base_url", DEFAULT_BASE_URL),
                 created_at=_parse_dt(item.get("created_at")) or datetime.now().astimezone(),
                 last_used_at=_parse_dt(item.get("last_used_at")),
+                last_validated_at=_parse_dt(item.get("last_validated_at")),
             )
         )
     return store
@@ -79,6 +80,8 @@ def dump_key_store(store: KeyStore) -> str:
         lines.append(f"created_at = {_toml_quote(format_dt(rec.created_at))}")
         if rec.last_used_at:
             lines.append(f"last_used_at = {_toml_quote(format_dt(rec.last_used_at))}")
+        if rec.last_validated_at:
+            lines.append(f"last_validated_at = {_toml_quote(format_dt(rec.last_validated_at))}")
         lines.append("")
     return "\n".join(lines)
 

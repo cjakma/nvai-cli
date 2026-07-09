@@ -37,6 +37,8 @@ def run_doctor() -> int:
         print(f"Base URL: {active.base_url}")
         print(f"API Key: {active.masked_key}")
         print(f"Expire date: {active.expiredate.astimezone().isoformat(timespec='seconds')}")
+        if active.last_validated_at:
+            print(f"Last validated: {active.last_validated_at.astimezone().isoformat(timespec='seconds')}")
         print(f"Key status: {status}")
 
     if executable is None:

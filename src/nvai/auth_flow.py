@@ -19,9 +19,15 @@ def validate_or_raise(record: ApiKeyRecord) -> None:
         raise NvidiaApiError(msg)
 
 
-def ensure_valid_api_key(*, force_refresh: bool = False) -> ApiKeyRecord:
+def _validated_today(record: ApiKeyRecord, now: datetime) -> bool:
+    if record.last_validated_at is None:
+        return False
+    return record.last_validated_at.astimezone().date() == now.astimezone().date()
+
+
+def ensure_valid_api_key(*, force_refresh: bool = False, now: datetime | None = None) -> ApiKeyRecord:
     store = load_key_store()
-    now = datetime.now().astimezone()
+    now = now or datetime.now().astimezone()
     active = store.active()
 
     if active is None:
@@ -42,6 +48,22 @@ def ensure_valid_api_key(*, force_refresh: bool = False) -> ApiKeyRecord:
             default_base_url=active.base_url,
         )
 
+    if not _validated_today(active, now):
+        print("[auth] Checking NVIDIA API key for today's session.")
+        try:
+            with Status("Daily NVIDIA API key check"):
+                validate_or_raise(active)
+        except NvidiaApiError as exc:
+            print(f"[auth] Daily NVIDIA API key check failed: {exc}")
+            print("[auth] Please enter a refreshed NVIDIA API key.")
+            return _collect_validate_save(
+                store,
+                default_name=suggest_daily_name(now, active.model),
+                default_model=active.model,
+                default_base_url=active.base_url,
+            )
+        active.last_validated_at = now
+
     active.last_used_at = now
     save_key_store(store)
     return active
@@ -59,6 +81,7 @@ def _collect_validate_save(
     with Status("Validating NVIDIA API key"):
         validate_or_raise(record)
     print("[auth] OK.")
+    record.last_validated_at = datetime.now().astimezone()
     store.upsert(record)
     store.active_key = record.name
     save_key_store(store)

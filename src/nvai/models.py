@@ -16,6 +16,7 @@ class ApiKeyRecord:
     base_url: str = DEFAULT_BASE_URL
     created_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     last_used_at: datetime | None = None
+    last_validated_at: datetime | None = None
 
     def is_expired(self, now: datetime | None = None) -> bool:
         now = now or datetime.now().astimezone()

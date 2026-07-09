@@ -50,6 +50,8 @@ def _cmd_auth(args: argparse.Namespace) -> int:
         print(f"Base URL: {active.base_url}")
         print(f"API Key: {active.masked_key}")
         print(f"Expire date: {active.expiredate.astimezone().isoformat(timespec='seconds')}")
+        if active.last_validated_at:
+            print(f"Last validated: {active.last_validated_at.astimezone().isoformat(timespec='seconds')}")
         print(f"Status: {status}")
         return 0
     if args.auth_command in {"add", "refresh"}:

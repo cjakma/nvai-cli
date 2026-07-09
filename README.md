@@ -226,6 +226,7 @@ nvai ask --yes "Inspect README and run safe commands if needed"
 nvai ask --policy strict "Run tests if needed"
 nvai ask --no-batch-patches "Approve proposed patches one by one"
 nvai ask --no-stream-detect "Disable streaming action detection"
+nvai ask --max-tokens 512 --timeout 240 "Use a longer NVIDIA wait budget"
 nvai tui                     # minimal full-screen curses UI
 nvai models                  # list NVIDIA models
 nvai doctor                  # inspect installation and key status
@@ -514,6 +515,7 @@ nvai ask --yes "README 확인 후 필요한 안전한 명령을 실행해줘"
 nvai ask --policy strict "필요하면 테스트를 실행해줘"
 nvai ask --no-batch-patches "patch는 하나씩 승인할게"
 nvai ask --no-stream-detect "streaming action 감지를 끄기"
+nvai ask --max-tokens 512 --timeout 240 "NVIDIA 응답 대기 시간을 더 길게 사용"
 nvai tui                     # 최소 full-screen curses UI
 nvai models                  # NVIDIA 모델 목록
 nvai doctor                  # 설치 및 key 상태 진단

@@ -6,6 +6,7 @@ from typing import Any
 
 from .nvidia_client import NvidiaClient
 from .policy import CommandPolicy
+from .runtime_config import DEFAULT_MAX_TOKENS
 from .tools import detect_complete_action_blocks, format_tool_results, parse_action_blocks, run_actions
 from .ui import Status
 
@@ -36,13 +37,14 @@ def stream_or_chat(
     *,
     stream: bool,
     model: str,
+    max_tokens: int,
     detect_actions: bool = True,
 ) -> str:
     if stream:
         print(f"[stream] Waiting for NVIDIA model response ({model})...", file=sys.stderr)
         chunks: list[str] = []
         announced_action_count = 0
-        for chunk in client.chat_stream(messages):
+        for chunk in client.chat_stream(messages, max_tokens=max_tokens):
             print(chunk, end="", flush=True)
             chunks.append(chunk)
             if detect_actions:
@@ -53,7 +55,7 @@ def stream_or_chat(
         print()
         return "".join(chunks)
     with Status(f"Waiting for NVIDIA model response ({model})"):
-        return client.chat(messages)
+        return client.chat(messages, max_tokens=max_tokens)
 
 
 def run_agent_turn(
@@ -67,6 +69,7 @@ def run_agent_turn(
     policy: CommandPolicy | None = None,
     batch_patches: bool = True,
     detect_stream_actions: bool = True,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> str:
     """Run a small Codex-like action loop.
 
@@ -82,6 +85,7 @@ def run_agent_turn(
             history,
             stream=stream,
             model=client.key.model,
+            max_tokens=max_tokens,
             detect_actions=detect_stream_actions,
         )
         last_answer = answer

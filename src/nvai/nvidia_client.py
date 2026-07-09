@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Iterable
 
 from .models import ApiKeyRecord
+from .runtime_config import DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT
 
 
 class NvidiaApiError(RuntimeError):
@@ -16,7 +18,7 @@ class NvidiaApiError(RuntimeError):
 @dataclass(slots=True)
 class NvidiaClient:
     key: ApiKeyRecord
-    timeout: float = 60.0
+    timeout: float = DEFAULT_TIMEOUT
 
     def _url(self, path: str) -> str:
         return self.key.base_url.rstrip("/") + "/" + path.lstrip("/")
@@ -51,6 +53,11 @@ class NvidiaClient:
                 return json.loads(text) if text else {}
         except urllib.error.HTTPError as exc:
             raise self._handle_http_error(exc) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise NvidiaApiError(
+                f"NVIDIA API timed out after {self.timeout:g}s waiting for the model. "
+                "Try again, lower --max-tokens, or set NVAI_MAX_TOKENS to a smaller value."
+            ) from exc
         except urllib.error.URLError as exc:
             raise NvidiaApiError(f"NVIDIA API network error: {exc.reason}") from exc
 
@@ -68,7 +75,7 @@ class NvidiaClient:
             return False, f"Key works, but model {self.key.model!r} was not listed."
         return True, "OK"
 
-    def chat(self, messages: Iterable[dict], *, max_tokens: int = 8192, temperature: float = 0.2) -> str:
+    def chat(self, messages: Iterable[dict], *, max_tokens: int = DEFAULT_MAX_TOKENS, temperature: float = 0.2) -> str:
         payload = {
             "model": self.key.model,
             "messages": list(messages),
@@ -82,7 +89,7 @@ class NvidiaClient:
         except (KeyError, IndexError, TypeError) as exc:
             raise NvidiaApiError(f"Unexpected NVIDIA response shape: {json.dumps(data)[:500]}") from exc
 
-    def chat_stream(self, messages: Iterable[dict], *, max_tokens: int = 8192, temperature: float = 0.2):
+    def chat_stream(self, messages: Iterable[dict], *, max_tokens: int = DEFAULT_MAX_TOKENS, temperature: float = 0.2):
         payload = {
             "model": self.key.model,
             "messages": list(messages),
@@ -123,5 +130,10 @@ class NvidiaClient:
                         continue
         except urllib.error.HTTPError as exc:
             raise self._handle_http_error(exc) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise NvidiaApiError(
+                f"NVIDIA API timed out after {self.timeout:g}s waiting for the model. "
+                "Try again, lower --max-tokens, or set NVAI_MAX_TOKENS to a smaller value."
+            ) from exc
         except urllib.error.URLError as exc:
             raise NvidiaApiError(f"NVIDIA API network error: {exc.reason}") from exc

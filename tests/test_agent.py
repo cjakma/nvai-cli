@@ -14,20 +14,20 @@ class FakeClient:
         )
         self.calls = 0
 
-    def chat_stream(self, messages):
+    def chat_stream(self, messages, **kwargs):
         self.calls += 1
         if self.calls == 1:
             yield 'Need to inspect.\n```nvai-actions\n[{"action":"read_file","path":"a.txt"}]\n```'
         else:
             yield "Done after reading."
 
-    def chat(self, messages):
+    def chat(self, messages, **kwargs):
         self.calls += 1
         return "Done"
 
 
 class SplitActionClient(FakeClient):
-    def chat_stream(self, messages):
+    def chat_stream(self, messages, **kwargs):
         self.calls += 1
         if self.calls == 1:
             yield "```nvai-actions\n"

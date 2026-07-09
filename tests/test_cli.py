@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from nvai.cli import _repl, build_parser, main
 from nvai.models import ApiKeyRecord
+from nvai.nvidia_client import NvidiaApiError
 
 
 def test_one_shot_prompt_routes_before_argparse():
@@ -91,4 +92,27 @@ def test_repl_ctrl_c_prints_bye(capsys):
         with patch("builtins.input", side_effect=KeyboardInterrupt):
             assert _repl() == 0
     captured = capsys.readouterr()
+    assert "bye" in captured.out
+
+
+def test_ask_max_tokens_flag_parse():
+    args = build_parser().parse_args(["ask", "hello", "--max-tokens", "128", "--timeout", "30"])
+    assert args.max_tokens == 128
+    assert args.timeout == 30.0
+
+
+def test_repl_handles_nvidia_api_error_without_traceback(capsys):
+    key = ApiKeyRecord(
+        name="k",
+        model="z-ai/glm-5.2",
+        api_key="secret",
+        expiredate=datetime.now().astimezone() + timedelta(days=1),
+    )
+    with patch("nvai.cli.ensure_valid_api_key", return_value=key), patch("nvai.cli.NvidiaClient"):
+        with patch("builtins.input", side_effect=["hello", "/exit"]):
+            with patch("nvai.cli.run_agent_turn", side_effect=NvidiaApiError("timed out")):
+                assert _repl() == 0
+    captured = capsys.readouterr()
+    assert "error: timed out" in captured.err
+    assert "Traceback" not in captured.err
     assert "bye" in captured.out

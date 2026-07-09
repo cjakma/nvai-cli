@@ -11,6 +11,7 @@ from .doctor import run_doctor
 from .key_store import load_key_store, save_key_store
 from .nvidia_client import NvidiaApiError, NvidiaClient
 from .policy import CommandPolicy, describe_policy
+from .runtime_config import default_max_tokens, default_timeout, parse_max_tokens, parse_timeout
 from .tui import run_curses_tui
 from .ui import Status
 
@@ -99,9 +100,11 @@ def _ask(
     policy_mode: str | None = None,
     batch_patches: bool = True,
     detect_stream_actions: bool = True,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
 ) -> int:
     key = ensure_valid_api_key()
-    client = NvidiaClient(key)
+    client = NvidiaClient(key, timeout=timeout if timeout is not None else default_timeout())
     policy = CommandPolicy.from_config()
     if policy_mode:
         policy = CommandPolicy(
@@ -111,6 +114,7 @@ def _ask(
             allowed_first_words=policy.allowed_first_words,
             denied_first_words=policy.denied_first_words,
         )
+    effective_max_tokens = max_tokens if max_tokens is not None else default_max_tokens()
     with Status("Collecting project context" if include_context else "Preparing prompt"):
         messages = _messages(prompt, include_context=include_context)
     print(f"[policy] {describe_policy(policy)}", file=sys.stderr)
@@ -122,6 +126,7 @@ def _ask(
         policy=policy,
         batch_patches=batch_patches,
         detect_stream_actions=detect_stream_actions,
+        max_tokens=effective_max_tokens,
     )
     return 0
 
@@ -139,7 +144,8 @@ def _cmd_models(args: argparse.Namespace) -> int:
 
 def _repl() -> int:
     key = ensure_valid_api_key()
-    client = NvidiaClient(key)
+    client = NvidiaClient(key, timeout=default_timeout())
+    max_tokens = default_max_tokens()
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
     print("nvai interactive mode. Type /help for commands. Ctrl+C exits.")
     while True:
@@ -163,7 +169,11 @@ def _repl() -> int:
             print("[context] added")
             continue
         history.append({"role": "user", "content": prompt})
-        run_agent_turn(client, history, stream=True, auto_approve=False)
+        try:
+            run_agent_turn(client, history, stream=True, auto_approve=False, max_tokens=max_tokens)
+        except NvidiaApiError as exc:
+            history.pop()
+            print(f"error: {exc}", file=sys.stderr)
 
 
 def _cmd_tui(args: argparse.Namespace) -> int:
@@ -208,17 +218,29 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--policy", choices=["ask", "strict", "off"], default=None, help="override shell command policy mode")
     ask.add_argument("--no-batch-patches", action="store_true", help="approve patch_file actions one by one")
     ask.add_argument("--no-stream-detect", action="store_true", help="disable action-block detection while streaming")
+    ask.add_argument(
+        "--max-tokens",
+        type=parse_max_tokens,
+        default=None,
+        help="maximum response tokens for NVIDIA chat completions (default: NVAI_MAX_TOKENS or 1024)",
+    )
+    ask.add_argument(
+        "--timeout",
+        type=parse_timeout,
+        default=None,
+        help="NVIDIA request read timeout in seconds (default: NVAI_TIMEOUT or 180)",
+    )
 
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] not in KNOWN_COMMANDS and not argv[0].startswith("-"):
-        return _ask(" ".join(argv))
-    parser = build_parser()
-    args = parser.parse_args(argv)
     try:
+        if argv and argv[0] not in KNOWN_COMMANDS and not argv[0].startswith("-"):
+            return _ask(" ".join(argv))
+        parser = build_parser()
+        args = parser.parse_args(argv)
         if args.command == "auth":
             return _cmd_auth(args)
         if args.command == "models":
@@ -236,11 +258,16 @@ def main(argv: list[str] | None = None) -> int:
                 policy_mode=args.policy,
                 batch_patches=not args.no_batch_patches,
                 detect_stream_actions=not args.no_stream_detect,
+                max_tokens=args.max_tokens,
+                timeout=args.timeout,
             )
         return _repl()
     except NvidiaApiError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

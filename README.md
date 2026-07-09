@@ -54,6 +54,10 @@ https://integrate.api.nvidia.com/v1
   - accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM:SS+09:00`, `YYYY/MM/DD`, and `MM/DD/YYYY`,
   - normalizes pasted URL shapes such as `<https://...|...>` and `host (https://...)`.
 - Visible status while waiting for network/model calls.
+- NVIDIA reasoning-model timeout handling:
+  - catches socket/read timeouts as concise CLI errors instead of Python tracebacks,
+  - keeps the REPL alive after provider errors,
+  - exposes bounded `--max-tokens` / `--timeout` flags and `NVAI_MAX_TOKENS` / `NVAI_TIMEOUT` environment variables.
 - Streaming model output.
 - Streaming-time action-block detection.
 - Codex-like action workflow:
@@ -282,6 +286,46 @@ Expire date: 2027-01-08T00:00:00+09:00
 Key status: valid
 ```
 
+### Recent server update: NVIDIA timeout handling
+
+The latest server-applied update addresses `TimeoutError: The read operation timed out` from NVIDIA GLM-5.2 chat completions.
+
+What changed:
+
+- Default chat completion output cap is now responsive: `DEFAULT_MAX_TOKENS=1024` instead of the earlier 8192-token default.
+- Default NVIDIA request timeout is now `180s`.
+- `TimeoutError` and `socket.timeout` are converted into `NvidiaApiError` messages, so users see a concise `error: NVIDIA API timed out...` message instead of a Python traceback.
+- REPL mode catches provider errors, removes the failed user turn from conversation history, and continues prompting.
+- `nvai ask` supports per-run tuning:
+
+```bash
+nvai ask --max-tokens 512 --timeout 240 "Use a longer NVIDIA wait budget"
+```
+
+Equivalent environment variables are also supported:
+
+```bash
+NVAI_MAX_TOKENS=512 NVAI_TIMEOUT=240 nvai
+```
+
+Server deployment notes for this host:
+
+- Live command: `/home/ubuntu/.local/bin/nvai`
+- Live project/venv target: `/home/ubuntu/agent-work/hermes/nvai-cli/.venv/bin/python`
+- Applied commit: `57c5422 fix: handle NVIDIA API timeouts`
+- Verified from caller directory: `/home/ubuntu/web-service`
+- Verification command examples:
+
+```bash
+nvai ask --help
+nvai doctor
+uv run pytest -q
+cd /home/ubuntu/web-service
+nvai ask '안녕' --no-context --max-tokens 16 --timeout 5
+```
+
+The short-timeout smoke test intentionally times out, but now exits cleanly with a CLI error rather than a traceback.
+
 ### Current limitations / next work
 
 - The TUI is currently a minimal chat surface, not yet a full patch/shell approval workbench.
@@ -343,6 +387,10 @@ https://integrate.api.nvidia.com/v1
   - `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM:SS+09:00`, `YYYY/MM/DD`, `MM/DD/YYYY` 지원,
   - `<https://...|...>`, `host (https://...)` 같은 붙여넣기 URL 정규화.
 - 네트워크/모델 응답 대기 중 상태 표시.
+- NVIDIA reasoning model timeout 처리:
+  - socket/read timeout을 Python traceback 대신 간단한 CLI error로 표시,
+  - provider error 후에도 REPL 유지,
+  - 제한 검증이 있는 `--max-tokens` / `--timeout` flag와 `NVAI_MAX_TOKENS` / `NVAI_TIMEOUT` 환경변수 제공.
 - streaming model output.
 - streaming 중 action block 감지.
 - Codex-like action workflow:
@@ -570,6 +618,46 @@ API Key: nvapi-****abcd
 Expire date: 2027-01-08T00:00:00+09:00
 Key status: valid
 ```
+
+### 최근 서버 반영 내용: NVIDIA timeout 처리
+
+최근 서버 반영 버전은 NVIDIA GLM-5.2 chat completion 호출 중 발생하던 `TimeoutError: The read operation timed out` 문제를 개선합니다.
+
+변경 내용:
+
+- 기본 chat completion 출력 cap을 기존 8192 token에서 `DEFAULT_MAX_TOKENS=1024` 낮춰 기본 응답성을 개선했습니다.
+- 기본 NVIDIA request timeout을 `180s`로 조정했습니다.
+- `TimeoutError`, `socket.timeout`을 `NvidiaApiError`로 변환하여 Python traceback 대신 `error: NVIDIA API timed out...` 형태의 간단한 CLI error를 출력합니다.
+- REPL mode에서 provider error가 발생해도 실패한 user turn을 history에서 제거하고 prompt를 계속 유지합니다.
+- `nvai ask`에서 실행별 조정이 가능합니다.
+
+```bash
+nvai ask --max-tokens 512 --timeout 240 "NVIDIA 응답 대기 시간을 더 길게 사용"
+```
+
+동일한 설정은 환경변수로도 지정할 수 있습니다.
+
+```bash
+NVAI_MAX_TOKENS=512 NVAI_TIMEOUT=240 nvai
+```
+
+이 서버의 반영 정보:
+
+- 실제 실행 명령: `/home/ubuntu/.local/bin/nvai`
+- 실제 project/venv target: `/home/ubuntu/agent-work/hermes/nvai-cli/.venv/bin/python`
+- 반영 commit: `57c5422 fix: handle NVIDIA API timeouts`
+- caller directory 검증 위치: `/home/ubuntu/web-service`
+- 검증 명령 예시:
+
+```bash
+nvai ask --help
+nvai doctor
+uv run pytest -q
+cd /home/ubuntu/web-service
+nvai ask '안녕' --no-context --max-tokens 16 --timeout 5
+```
+
+짧은 timeout smoke test는 의도적으로 timeout을 발생시키지만, 이제 traceback이 아니라 CLI error로 정상 처리됩니다.
 
 ### 현재 한계 / 다음 작업
 
